@@ -3,13 +3,13 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import 'package:ytdl_app/home.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-void main() {
-  WidgetsBinding.instance.addPostFrameCallback((_) async {
-    var status = await Permission.storage.status;
-    if (status.isDenied) {
-      await Permission.storage.request();
-    }
-  });
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  var status = await Permission.storage.status;
+  if (status.isDenied) {
+    await Permission.storage.request();
+  }
+
   runApp(MainApp());
 }
 

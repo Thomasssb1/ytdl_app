@@ -14,7 +14,7 @@ class HomeApp extends StatefulWidget {
   State<HomeApp> createState() => _HomeAppState();
 }
 
-class _HomeAppState extends State<HomeApp> {
+class _HomeAppState extends State<HomeApp> with ChangeNotifier {
   final TextEditingController urlController = TextEditingController();
   final YoutubeExplode yt = YoutubeExplode();
   final messengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -32,6 +32,22 @@ class _HomeAppState extends State<HomeApp> {
     super.initState();
   }
 
+  String generateFilename(String title) => title
+      .replaceAll('#', '')
+      .replaceAll('%', '')
+      .replaceAll('&', '')
+      .replaceAll('{', '')
+      .replaceAll('}', '')
+      .replaceAll(r'\', '')
+      .replaceAll(r'$', '')
+      .replaceAll('!', '')
+      .replaceAll("'", '')
+      .replaceAll('"', '')
+      .replaceAll(':', '')
+      .replaceAll('@', '')
+      .replaceAll('.', '')
+      .replaceAll(' ', '-');
+
   Future<void> downloadVideo() async {
     // check if currently downloading
     // if not downloading then start download
@@ -40,6 +56,7 @@ class _HomeAppState extends State<HomeApp> {
     print("trig");
     // need to check if file exists and ask if replace
     if (!isDownloading) {
+      //setState(() => isDownloading = true);
       late var streamInfo;
       var manifest = await yt.videos.streams.getManifest(videos[0]['metadata'].id);
       if (videos[0]['type'] == 'muxed') {
@@ -50,8 +67,8 @@ class _HomeAppState extends State<HomeApp> {
         streamInfo = manifest.audioOnly.sortByBitrate().first;
       }
       var stream = yt.videos.streamsClient.get(streamInfo);
-      final file = File(
-          "${downloadsDir!.path}/${videos[0]['metadata'].title.replaceAll(' ', '-')}.${streamInfo.container.name}");
+      final file =
+          File("${downloadsDir!.path}/${generateFilename(videos[0]['metadata'].title)}.${streamInfo.container.name}");
 
       if (file.existsSync()) {
         file.deleteSync();
@@ -64,15 +81,15 @@ class _HomeAppState extends State<HomeApp> {
 
       await for (final data in stream) {
         current += data.length;
-        setState(() {
-          videos[0]['progress'] = (current / streamInfo.size.totalBytes);
-        });
+        videos[0]['progress'].value = (current / streamInfo.size.totalBytes);
         output.add(data);
       }
       await output.close();
       videos.removeAt(0);
       if (videos.isNotEmpty) {
         await downloadVideo();
+      } else {
+        isDownloading = false;
       }
     }
   }
@@ -94,21 +111,97 @@ class _HomeAppState extends State<HomeApp> {
               controller: urlController,
               textAlignVertical: TextAlignVertical.center,
               onSubmitted: (_) async {
-                setState(() {
-                  isFetching = true;
-                });
-                var video = await yt.videos.get(urlController.text);
-                setState(() {
-                  videos.add({
-                    "url": urlController.text,
-                    "title": video.title,
-                    "thumbnail": video.thumbnails.mediumResUrl,
-                    "type": 'muxed',
-                    "progress": 0.0,
-                    "metadata": video
+                try {
+                  setState(() {
+                    isFetching = true;
                   });
-                  isFetching = false;
-                });
+                  var video = await yt.videos.get(urlController.text);
+                  setState(() {
+                    videos.add({
+                      "url": urlController.text,
+                      "title": video.title,
+                      "thumbnail": video.thumbnails.mediumResUrl,
+                      "type": 'muxed',
+                      "progress": ValueNotifier<double>(0.0),
+                      "metadata": video
+                    });
+                    urlController.text = "";
+                    isFetching = false;
+                  });
+                  if (downloadsDir == null) {
+                    directoryController = TextEditingController();
+                    if (mounted) {
+                      await showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (ctx) {
+                            return AlertDialog(
+                              title: const Text("Download location"),
+                              content: SizedBox(
+                                  height: 150,
+                                  child: Column(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                                    const Text("Where should the videos be downloaded?"),
+                                    TextField(
+                                        readOnly: true,
+                                        controller: directoryController,
+                                        enabled: true,
+                                        decoration: InputDecoration(
+                                            hintText: "No directory selected..",
+                                            suffixIcon: InkWell(
+                                                onTap: () async {
+                                                  String? selectedDirectory =
+                                                      await FilePicker.platform.getDirectoryPath();
+                                                  if (selectedDirectory == null) {
+                                                    setState(() {
+                                                      videos.removeLast();
+                                                    });
+                                                    Navigator.of(context).pop();
+                                                  } else {
+                                                    directoryController.text = selectedDirectory;
+                                                  }
+                                                },
+                                                child: Ink(child: Image.asset('assets/folder.png')))))
+                                  ])),
+                              actions: [
+                                TextButton(
+                                    onPressed: () {
+                                      if (directoryController.text.isNotEmpty) {
+                                        downloadsDir = Directory(directoryController.text);
+                                      } else {
+                                        setState(() {
+                                          videos.removeLast();
+                                        });
+                                      }
+                                      Navigator.of(context).pop();
+                                    },
+                                    child: Text("Submit", style: GoogleFonts.inter(color: const Color(0XFF2AB017))))
+                              ],
+                            );
+                          });
+                    }
+                  }
+                  if (videos.isNotEmpty) {
+                    await downloadVideo();
+                  }
+                } on VideoUnavailableException catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    backgroundColor: Color(0xFFB0172A),
+                    content: Text("The video that you tried to download is not valid or private."),
+                    showCloseIcon: true,
+                  ));
+                } on VideoRequiresPurchaseException catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    backgroundColor: Color(0xFFB0172A),
+                    content: Text("The video that you tried to download requires purchase in order to view."),
+                    showCloseIcon: true,
+                  ));
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    backgroundColor: Color(0xFFB0172A),
+                    content: Text("Something went wrong.. Try again."),
+                    showCloseIcon: true,
+                  ));
+                }
               },
               decoration: InputDecoration(
                 prefix: Padding(padding: const EdgeInsets.only(right: 7), child: Image.asset('assets/play.png')),
@@ -128,10 +221,11 @@ class _HomeAppState extends State<HomeApp> {
                             "title": video.title,
                             "thumbnail": video.thumbnails.mediumResUrl,
                             "type": 'muxed',
-                            "progress": 0.0,
+                            "progress": ValueNotifier<double>(0.0),
                             "metadata": video
                           });
                           isFetching = false;
+                          urlController.text = "";
                         });
                         if (downloadsDir == null) {
                           directoryController = TextEditingController();
@@ -250,6 +344,9 @@ class _HomeAppState extends State<HomeApp> {
                 shrinkWrap: true,
                 itemCount: videos.length,
                 itemBuilder: ((BuildContext context, int count) {
+                  print(count);
+                  print(isDownloading);
+                  print((count == 0) && isDownloading);
                   return Padding(
                       padding: const EdgeInsets.only(bottom: 25),
                       child: GestureDetector(
@@ -395,23 +492,44 @@ class _HomeAppState extends State<HomeApp> {
                                                     fontSize: 16,
                                                     fontWeight: FontWeight.bold),
                                               ))),
-                                      Visibility(
-                                          visible: true,
-                                          child: Padding(
-                                              padding: const EdgeInsets.only(left: 3, top: 5),
-                                              child: SizedBox(
-                                                  width: 200,
-                                                  child: LinearProgressIndicator(
-                                                    value: videos[count]['progress'],
-                                                    backgroundColor: const Color.fromRGBO(0, 0, 0, 0.7),
-                                                    color: const Color(0xFFB0172A),
-                                                    borderRadius: const BorderRadius.all(Radius.circular(20)),
-                                                  )))),
-                                      Visibility(
-                                          visible: true,
-                                          child: Padding(
-                                              padding: const EdgeInsets.all(12),
-                                              child: InkWell(
+                                      ValueListenableBuilder(
+                                          valueListenable: videos[count]['progress'],
+                                          builder: (BuildContext context, double value, child) {
+                                            print("hi: ${value}");
+                                            return Padding(
+                                                padding: const EdgeInsets.only(left: 3, top: 5),
+                                                child: SizedBox(
+                                                    width: 200,
+                                                    child: LinearProgressIndicator(
+                                                      value: value,
+                                                      backgroundColor: const Color.fromRGBO(0, 0, 0, 0.7),
+                                                      color: const Color(0xFFB0172A),
+                                                      borderRadius: const BorderRadius.all(Radius.circular(20)),
+                                                    )));
+                                          }),
+                                      Padding(
+                                          padding: const EdgeInsets.all(12),
+                                          child: (count == 0) && isDownloading
+                                              ? InkWell(
+                                                  onTap: () {
+                                                    showDialog(
+                                                        context: context,
+                                                        builder: (ctx) {
+                                                          return AlertDialog(
+                                                            title: Text('Video settings'),
+                                                            content: Column(children: [
+                                                              TextField(
+                                                                enabled: false,
+                                                                decoration: InputDecoration(
+                                                                  labelText: 'Title',
+                                                                ),
+                                                              )
+                                                            ]),
+                                                          );
+                                                        });
+                                                  },
+                                                  child: Ink(child: Image.asset('assets/options.png')))
+                                              : InkWell(
                                                   onTap: () {
                                                     if (videos[count]['type'] == 'muxed') {
                                                       setState(() {
@@ -476,7 +594,7 @@ class _HomeAppState extends State<HomeApp> {
                                                   child: Ink(
                                                       child: Image.asset(
                                                     'assets/${videos[count]["type"]}.png',
-                                                  )))))
+                                                  ))))
                                     ],
                                   ))
                             ],
