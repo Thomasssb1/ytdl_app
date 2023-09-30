@@ -6,6 +6,8 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import 'package:marquee/marquee.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:hive/hive.dart';
+import 'package:ytdl_app/setting.dart';
 
 class HomeApp extends StatefulWidget {
   HomeApp({super.key});
@@ -25,7 +27,9 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
 
   bool isDownloading = false;
   bool isFetching = false;
-  Directory? downloadsDir;
+  //Directory? downloadsDir;
+
+  var settingsBox = Hive.box('settings');
 
   @override
   void initState() {
@@ -56,7 +60,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
     print("trig");
     // need to check if file exists and ask if replace
     if (!isDownloading) {
-      //setState(() => isDownloading = true);
+      setState(() => isDownloading = true);
       late var streamInfo;
       var manifest = await yt.videos.streams.getManifest(videos[0]['metadata'].id);
       if (videos[0]['type'] == 'muxed') {
@@ -67,8 +71,8 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
         streamInfo = manifest.audioOnly.sortByBitrate().first;
       }
       var stream = yt.videos.streamsClient.get(streamInfo);
-      final file =
-          File("${downloadsDir!.path}/${generateFilename(videos[0]['metadata'].title)}.${streamInfo.container.name}");
+      final file = File(
+          "${settingsBox.get('installDirectory')}/${generateFilename(videos[0]['metadata'].title)}.${streamInfo.container.name}");
 
       if (file.existsSync()) {
         file.deleteSync();
@@ -80,12 +84,14 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
       int current = 0;
 
       await for (final data in stream) {
+        print(data.length);
         current += data.length;
         videos[0]['progress'].value = (current / streamInfo.size.totalBytes);
         output.add(data);
       }
       await output.close();
-      videos.removeAt(0);
+      setState(() => videos.removeAt(0));
+
       if (videos.isNotEmpty) {
         await downloadVideo();
       } else {
@@ -128,7 +134,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                     urlController.text = "";
                     isFetching = false;
                   });
-                  if (downloadsDir == null) {
+                  if (settingsBox.get('installDirectory') == null) {
                     directoryController = TextEditingController();
                     if (mounted) {
                       await showDialog(
@@ -166,7 +172,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                                 TextButton(
                                     onPressed: () {
                                       if (directoryController.text.isNotEmpty) {
-                                        downloadsDir = Directory(directoryController.text);
+                                        settingsBox.put('installDirectory', directoryController.text);
                                       } else {
                                         setState(() {
                                           videos.removeLast();
@@ -227,7 +233,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                           isFetching = false;
                           urlController.text = "";
                         });
-                        if (downloadsDir == null) {
+                        if (settingsBox.get('installDirectory') == null) {
                           directoryController = TextEditingController();
                           if (mounted) {
                             await showDialog(
@@ -265,7 +271,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                                       TextButton(
                                           onPressed: () {
                                             if (directoryController.text.isNotEmpty) {
-                                              downloadsDir = Directory(directoryController.text);
+                                              settingsBox.put('installDirectory', directoryController.text);
                                             } else {
                                               setState(() {
                                                 videos.removeLast();
@@ -495,7 +501,6 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                                       ValueListenableBuilder(
                                           valueListenable: videos[count]['progress'],
                                           builder: (BuildContext context, double value, child) {
-                                            print("hi: ${value}");
                                             return Padding(
                                                 padding: const EdgeInsets.only(left: 3, top: 5),
                                                 child: SizedBox(
@@ -516,16 +521,27 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                                                         context: context,
                                                         builder: (ctx) {
                                                           return AlertDialog(
-                                                            title: Text('Video settings'),
-                                                            content: Column(children: [
-                                                              TextField(
-                                                                enabled: false,
-                                                                decoration: InputDecoration(
-                                                                  labelText: 'Title',
-                                                                ),
-                                                              )
-                                                            ]),
-                                                          );
+                                                              title: Text('Video settings'),
+                                                              content: Column(children: [
+                                                                ListView(scrollDirection: Axis.horizontal, children: [
+                                                                  TextField(
+                                                                    enabled: false,
+                                                                    decoration: InputDecoration(
+                                                                      labelText:
+                                                                          'Title : ${generateFilename(videos[count]['title'])}',
+                                                                    ),
+                                                                  )
+                                                                ]),
+                                                              ]),
+                                                              actions: [
+                                                                TextButton(
+                                                                    onPressed: () {
+                                                                      Navigator.of(context).pop();
+                                                                    },
+                                                                    child: Text("Close",
+                                                                        style: GoogleFonts.inter(
+                                                                            color: const Color(0xFFB0172A))))
+                                                              ]);
                                                         });
                                                   },
                                                   child: Ink(child: Image.asset('assets/options.png')))
