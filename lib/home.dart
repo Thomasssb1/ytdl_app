@@ -22,6 +22,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
   final messengerKey = GlobalKey<ScaffoldMessengerState>();
 
   late TextEditingController directoryController;
+  late TextEditingController nameController;
 
   List<Map> videos = [];
 
@@ -50,7 +51,17 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
       .replaceAll(':', '')
       .replaceAll('@', '')
       .replaceAll('.', '')
+      .replaceAll('|', '')
       .replaceAll(' ', '-');
+
+  bool containsURL(String url) {
+    for (final item in videos) {
+      if (item.containsValue(url)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   Future<void> downloadVideo() async {
     // check if currently downloading
@@ -71,31 +82,87 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
         streamInfo = manifest.audioOnly.sortByBitrate().first;
       }
       var stream = yt.videos.streamsClient.get(streamInfo);
-      final file = File(
+      File file = File(
           "${settingsBox.get('installDirectory')}/${generateFilename(videos[0]['metadata'].title)}.${streamInfo.container.name}");
 
+      bool skipVideo = false;
+
       if (file.existsSync()) {
-        file.deleteSync();
+        nameController = TextEditingController();
+        await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) {
+              return AlertDialog(
+                title: const Text("This file already exists"),
+                content: SizedBox(
+                    height: 150,
+                    child: Column(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                      Text(
+                          "The filename that has been generated has a duplicate name, either change the name or skip download."),
+                      TextField(
+                          controller: nameController,
+                          enabled: true,
+                          decoration: InputDecoration(
+                            hintText: "Enter new name..",
+                          )),
+                    ])),
+                actions: [
+                  TextButton(
+                      onPressed: () {
+                        skipVideo = true;
+                        Navigator.of(context).pop();
+                      },
+                      child: Text(
+                        "Skip",
+                        style: GoogleFonts.inter(color: const Color(0xFFB0172A)),
+                      )),
+                  TextButton(
+                      onPressed: () {
+                        print(nameController.text.length);
+                        if (nameController.text.isNotEmpty) {
+                          file = File(
+                              "${settingsBox.get('installDirectory')}/${nameController.text}.${streamInfo.container.name}");
+                        } else {
+                          file.deleteSync();
+                        }
+
+                        Navigator.of(context).pop();
+                      },
+                      child: Text(
+                        "Continue",
+                        style: GoogleFonts.inter(color: const Color(0XFF2AB017)),
+                      )),
+                ],
+              );
+            });
       }
+      if (!skipVideo) {
+        final output = file.openWrite(mode: FileMode.writeOnlyAppend);
 
-      final output = file.openWrite(mode: FileMode.writeOnlyAppend);
+        videos[0]['length'] = streamInfo.size.totalBytes;
+        int current = 0;
 
-      videos[0]['length'] = streamInfo.size.totalBytes;
-      int current = 0;
+        await for (final data in stream) {
+          print(data.length);
+          current += data.length;
+          videos[0]['progress'].value = (current / streamInfo.size.totalBytes);
+          output.add(data);
+        }
+        await output.close();
+        setState(() {
+          videos.removeAt(0);
+          isDownloading = false;
+        });
 
-      await for (final data in stream) {
-        print(data.length);
-        current += data.length;
-        videos[0]['progress'].value = (current / streamInfo.size.totalBytes);
-        output.add(data);
-      }
-      await output.close();
-      setState(() => videos.removeAt(0));
-
-      if (videos.isNotEmpty) {
-        await downloadVideo();
+        if (videos.isNotEmpty) {
+          await downloadVideo();
+        }
       } else {
-        isDownloading = false;
+        setState(() {
+          videos.removeAt(0);
+          isDownloading = false;
+        });
       }
     }
   }
@@ -117,96 +184,131 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
               controller: urlController,
               textAlignVertical: TextAlignVertical.center,
               onSubmitted: (_) async {
-                try {
-                  setState(() {
-                    isFetching = true;
-                  });
-                  var video = await yt.videos.get(urlController.text);
-                  setState(() {
-                    videos.add({
-                      "url": urlController.text,
-                      "title": video.title,
-                      "thumbnail": video.thumbnails.mediumResUrl,
-                      "type": 'muxed',
-                      "progress": ValueNotifier<double>(0.0),
-                      "metadata": video
+                bool addVideo = true;
+                if (containsURL(urlController.text)) {
+                  await showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (ctx) {
+                        return AlertDialog(
+                          title: const Text("Duplicate link"),
+                          content: const Text(
+                              "This video has already been added to the queue. Do you want to add it anyway?"),
+                          actions: [
+                            TextButton(
+                                onPressed: () {
+                                  addVideo = false;
+                                  Navigator.of(context).pop();
+                                },
+                                child: Text(
+                                  "No",
+                                  style: GoogleFonts.inter(color: const Color(0xFFB0172A)),
+                                )),
+                            TextButton(
+                                onPressed: () {
+                                  Navigator.of(context).pop();
+                                },
+                                child: Text(
+                                  "Yes",
+                                  style: GoogleFonts.inter(color: const Color(0XFF2AB017)),
+                                ))
+                          ],
+                        );
+                      });
+                }
+                if (addVideo) {
+                  try {
+                    setState(() => isFetching = true);
+
+                    var video = await yt.videos.get(urlController.text);
+                    setState(() {
+                      videos.add({
+                        "url": urlController.text,
+                        "title": video.title,
+                        "thumbnail": video.thumbnails.mediumResUrl,
+                        "type": 'muxed',
+                        "progress": ValueNotifier<double>(0.0),
+                        "metadata": video
+                      });
+                      urlController.text = "";
+                      isFetching = false;
                     });
-                    urlController.text = "";
-                    isFetching = false;
-                  });
-                  if (settingsBox.get('installDirectory') == null) {
-                    directoryController = TextEditingController();
-                    if (mounted) {
-                      await showDialog(
-                          context: context,
-                          barrierDismissible: false,
-                          builder: (ctx) {
-                            return AlertDialog(
-                              title: const Text("Download location"),
-                              content: SizedBox(
-                                  height: 150,
-                                  child: Column(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                                    const Text("Where should the videos be downloaded?"),
-                                    TextField(
-                                        readOnly: true,
-                                        controller: directoryController,
-                                        enabled: true,
-                                        decoration: InputDecoration(
-                                            hintText: "No directory selected..",
-                                            suffixIcon: InkWell(
-                                                onTap: () async {
-                                                  String? selectedDirectory =
-                                                      await FilePicker.platform.getDirectoryPath();
-                                                  if (selectedDirectory == null) {
-                                                    setState(() {
-                                                      videos.removeLast();
-                                                    });
-                                                    Navigator.of(context).pop();
-                                                  } else {
-                                                    directoryController.text = selectedDirectory;
-                                                  }
-                                                },
-                                                child: Ink(child: Image.asset('assets/folder.png')))))
-                                  ])),
-                              actions: [
-                                TextButton(
-                                    onPressed: () {
-                                      if (directoryController.text.isNotEmpty) {
-                                        settingsBox.put('installDirectory', directoryController.text);
-                                      } else {
-                                        setState(() {
-                                          videos.removeLast();
-                                        });
-                                      }
-                                      Navigator.of(context).pop();
-                                    },
-                                    child: Text("Submit", style: GoogleFonts.inter(color: const Color(0XFF2AB017))))
-                              ],
-                            );
-                          });
+                    if (settingsBox.get('installDirectory') == null) {
+                      directoryController = TextEditingController();
+                      if (mounted) {
+                        await showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (ctx) {
+                              return AlertDialog(
+                                title: const Text("Download location"),
+                                content: SizedBox(
+                                    height: 150,
+                                    child: Column(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                                      const Text("Where should the videos be downloaded?"),
+                                      TextField(
+                                          readOnly: true,
+                                          controller: directoryController,
+                                          enabled: true,
+                                          decoration: InputDecoration(
+                                              hintText: "No directory selected..",
+                                              suffixIcon: InkWell(
+                                                  onTap: () async {
+                                                    String? selectedDirectory =
+                                                        await FilePicker.platform.getDirectoryPath();
+                                                    if (selectedDirectory == null) {
+                                                      setState(() {
+                                                        videos.removeLast();
+                                                      });
+                                                      Navigator.of(context).pop();
+                                                    } else {
+                                                      directoryController.text = selectedDirectory;
+                                                    }
+                                                  },
+                                                  child: Ink(child: Image.asset('assets/folder.png')))))
+                                    ])),
+                                actions: [
+                                  TextButton(
+                                      onPressed: () {
+                                        if (directoryController.text.isNotEmpty) {
+                                          settingsBox.put('installDirectory', directoryController.text);
+                                        } else {
+                                          setState(() {
+                                            videos.removeLast();
+                                          });
+                                        }
+                                        Navigator.of(context).pop();
+                                      },
+                                      child: Text("Submit", style: GoogleFonts.inter(color: const Color(0XFF2AB017))))
+                                ],
+                              );
+                            });
+                      }
                     }
+                    if (videos.isNotEmpty) {
+                      await downloadVideo();
+                    }
+                  } on VideoUnavailableException catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      backgroundColor: Color(0xFFB0172A),
+                      content: Text("The video that you tried to download is not valid or private."),
+                      showCloseIcon: true,
+                    ));
+                  } on VideoRequiresPurchaseException catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      backgroundColor: Color(0xFFB0172A),
+                      content: Text("The video that you tried to download requires purchase in order to view."),
+                      showCloseIcon: true,
+                    ));
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      backgroundColor: Color(0xFFB0172A),
+                      content: Text("Something went wrong.. Try again."),
+                      showCloseIcon: true,
+                    ));
                   }
-                  if (videos.isNotEmpty) {
-                    await downloadVideo();
-                  }
-                } on VideoUnavailableException catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    backgroundColor: Color(0xFFB0172A),
-                    content: Text("The video that you tried to download is not valid or private."),
-                    showCloseIcon: true,
-                  ));
-                } on VideoRequiresPurchaseException catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    backgroundColor: Color(0xFFB0172A),
-                    content: Text("The video that you tried to download requires purchase in order to view."),
-                    showCloseIcon: true,
-                  ));
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    backgroundColor: Color(0xFFB0172A),
-                    content: Text("Something went wrong.. Try again."),
-                    showCloseIcon: true,
-                  ));
+                } else {
+                  setState(() => urlController.text = "");
                 }
               },
               decoration: InputDecoration(
@@ -216,97 +318,132 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                 suffixIcon: InkWell(
                     child: Ink(child: Image.asset('assets/search.png')),
                     onTap: () async {
-                      try {
-                        setState(() {
-                          isFetching = true;
-                        });
-                        var video = await yt.videos.get(urlController.text);
-                        setState(() {
-                          videos.add({
-                            "url": urlController.text,
-                            "title": video.title,
-                            "thumbnail": video.thumbnails.mediumResUrl,
-                            "type": 'muxed',
-                            "progress": ValueNotifier<double>(0.0),
-                            "metadata": video
+                      bool addVideo = true;
+                      if (containsURL(urlController.text)) {
+                        await showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (ctx) {
+                              return AlertDialog(
+                                title: const Text("Duplicate link"),
+                                content: const Text(
+                                    "This video has already been added to the queue. Do you want to add it anyway?"),
+                                actions: [
+                                  TextButton(
+                                      onPressed: () {
+                                        addVideo = false;
+                                        Navigator.of(context).pop();
+                                      },
+                                      child: Text(
+                                        "No",
+                                        style: GoogleFonts.inter(color: const Color(0xFFB0172A)),
+                                      )),
+                                  TextButton(
+                                      onPressed: () {
+                                        Navigator.of(context).pop();
+                                      },
+                                      child: Text(
+                                        "Yes",
+                                        style: GoogleFonts.inter(color: const Color(0XFF2AB017)),
+                                      ))
+                                ],
+                              );
+                            });
+                      }
+                      if (addVideo) {
+                        try {
+                          setState(() => isFetching = true);
+
+                          var video = await yt.videos.get(urlController.text);
+                          setState(() {
+                            videos.add({
+                              "url": urlController.text,
+                              "title": video.title,
+                              "thumbnail": video.thumbnails.mediumResUrl,
+                              "type": 'muxed',
+                              "progress": ValueNotifier<double>(0.0),
+                              "metadata": video
+                            });
+                            isFetching = false;
+                            urlController.text = "";
                           });
-                          isFetching = false;
-                          urlController.text = "";
-                        });
-                        if (settingsBox.get('installDirectory') == null) {
-                          directoryController = TextEditingController();
-                          if (mounted) {
-                            await showDialog(
-                                context: context,
-                                barrierDismissible: false,
-                                builder: (ctx) {
-                                  return AlertDialog(
-                                    title: const Text("Download location"),
-                                    content: SizedBox(
-                                        height: 150,
-                                        child: Column(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                                          const Text("Where should the videos be downloaded?"),
-                                          TextField(
-                                              readOnly: true,
-                                              controller: directoryController,
-                                              enabled: true,
-                                              decoration: InputDecoration(
-                                                  hintText: "No directory selected..",
-                                                  suffixIcon: InkWell(
-                                                      onTap: () async {
-                                                        String? selectedDirectory =
-                                                            await FilePicker.platform.getDirectoryPath();
-                                                        if (selectedDirectory == null) {
-                                                          setState(() {
-                                                            videos.removeLast();
-                                                          });
-                                                          Navigator.of(context).pop();
-                                                        } else {
-                                                          directoryController.text = selectedDirectory;
-                                                        }
-                                                      },
-                                                      child: Ink(child: Image.asset('assets/folder.png')))))
-                                        ])),
-                                    actions: [
-                                      TextButton(
-                                          onPressed: () {
-                                            if (directoryController.text.isNotEmpty) {
-                                              settingsBox.put('installDirectory', directoryController.text);
-                                            } else {
-                                              setState(() {
-                                                videos.removeLast();
-                                              });
-                                            }
-                                            Navigator.of(context).pop();
-                                          },
-                                          child:
-                                              Text("Submit", style: GoogleFonts.inter(color: const Color(0XFF2AB017))))
-                                    ],
-                                  );
-                                });
+                          if (settingsBox.get('installDirectory') == null) {
+                            directoryController = TextEditingController();
+                            if (mounted) {
+                              await showDialog(
+                                  context: context,
+                                  barrierDismissible: false,
+                                  builder: (ctx) {
+                                    return AlertDialog(
+                                      title: const Text("Download location"),
+                                      content: SizedBox(
+                                          height: 150,
+                                          child: Column(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                                            const Text("Where should the videos be downloaded?"),
+                                            TextField(
+                                                readOnly: true,
+                                                controller: directoryController,
+                                                enabled: true,
+                                                decoration: InputDecoration(
+                                                    hintText: "No directory selected..",
+                                                    suffixIcon: InkWell(
+                                                        onTap: () async {
+                                                          String? selectedDirectory =
+                                                              await FilePicker.platform.getDirectoryPath();
+                                                          if (selectedDirectory == null) {
+                                                            setState(() {
+                                                              videos.removeLast();
+                                                            });
+                                                            Navigator.of(context).pop();
+                                                          } else {
+                                                            directoryController.text = selectedDirectory;
+                                                          }
+                                                        },
+                                                        child: Ink(child: Image.asset('assets/folder.png')))))
+                                          ])),
+                                      actions: [
+                                        TextButton(
+                                            onPressed: () {
+                                              if (directoryController.text.isNotEmpty) {
+                                                settingsBox.put('installDirectory', directoryController.text);
+                                              } else {
+                                                setState(() {
+                                                  videos.removeLast();
+                                                });
+                                              }
+                                              Navigator.of(context).pop();
+                                            },
+                                            child: Text("Submit",
+                                                style: GoogleFonts.inter(color: const Color(0XFF2AB017))))
+                                      ],
+                                    );
+                                  });
+                            }
                           }
+                          if (videos.isNotEmpty) {
+                            await downloadVideo();
+                          }
+                        } on VideoUnavailableException catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            backgroundColor: Color(0xFFB0172A),
+                            content: Text("The video that you tried to download is not valid or private."),
+                            showCloseIcon: true,
+                          ));
+                        } on VideoRequiresPurchaseException catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            backgroundColor: Color(0xFFB0172A),
+                            content: Text("The video that you tried to download requires purchase in order to view."),
+                            showCloseIcon: true,
+                          ));
+                        } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            backgroundColor: Color(0xFFB0172A),
+                            content: Text("Something went wrong.. Try again."),
+                            showCloseIcon: true,
+                          ));
                         }
-                        if (videos.isNotEmpty) {
-                          await downloadVideo();
-                        }
-                      } on VideoUnavailableException catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                          backgroundColor: Color(0xFFB0172A),
-                          content: Text("The video that you tried to download is not valid or private."),
-                          showCloseIcon: true,
-                        ));
-                      } on VideoRequiresPurchaseException catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                          backgroundColor: Color(0xFFB0172A),
-                          content: Text("The video that you tried to download requires purchase in order to view."),
-                          showCloseIcon: true,
-                        ));
-                      } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                          backgroundColor: Color(0xFFB0172A),
-                          content: Text("Something went wrong.. Try again."),
-                          showCloseIcon: true,
-                        ));
+                      } else {
+                        setState(() => urlController.text = "");
                       }
                     }),
                 alignLabelWithHint: true,
