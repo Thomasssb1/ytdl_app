@@ -32,9 +32,18 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
 
   var settingsBox = Hive.box('settings');
 
+  String defaultDownloadType = Hive.box('settings').get('downloadType', defaultValue: 'muxed');
+
   @override
   void initState() {
     super.initState();
+  }
+
+  @override
+  void dispose() {
+    directoryController.dispose();
+    nameController.dispose();
+    super.dispose();
   }
 
   String generateFilename(String title) => title
@@ -226,7 +235,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                         "url": urlController.text,
                         "title": video.title,
                         "thumbnail": video.thumbnails.mediumResUrl,
-                        "type": 'muxed',
+                        "type": defaultDownloadType,
                         "progress": ValueNotifier<double>(0.0),
                         "metadata": video
                       });
@@ -360,7 +369,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                               "url": urlController.text,
                               "title": video.title,
                               "thumbnail": video.thumbnails.mediumResUrl,
-                              "type": 'muxed',
+                              "type": defaultDownloadType,
                               "progress": ValueNotifier<double>(0.0),
                               "metadata": video
                             });
@@ -471,7 +480,89 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                       isDownloading = !isDownloading;
                     });
                   },
-                  child: Ink(child: isDownloading ? Image.asset('assets/pause.png') : Image.asset('assets/play.png')))
+                  child: Ink(child: isDownloading ? Image.asset('assets/pause.png') : Image.asset('assets/play.png'))),
+              Padding(
+                  padding: EdgeInsets.only(left: 240),
+                  child: InkWell(
+                      onTap: () async {
+                        directoryController = TextEditingController();
+                        await showDialog(
+                            context: context,
+                            builder: (ctx) {
+                              return AlertDialog(
+                                title: const Text("Settings"),
+                                content: StatefulBuilder(builder: (BuildContext context, setState) {
+                                  return SizedBox(
+                                    height: 200,
+                                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                      const Text("Where should the videos be downloaded?"),
+                                      TextField(
+                                          readOnly: true,
+                                          controller: directoryController,
+                                          enabled: true,
+                                          decoration: InputDecoration(
+                                              hintText: (settingsBox.get('installDirectory') == null)
+                                                  ? "No directory selected.."
+                                                  : settingsBox.get('installDirectory'),
+                                              suffixIcon: InkWell(
+                                                  onTap: () async {
+                                                    String? selectedDirectory =
+                                                        await FilePicker.platform.getDirectoryPath();
+                                                    if (selectedDirectory != null) {
+                                                      settingsBox.put('installDirectory', selectedDirectory);
+                                                      directoryController.text = selectedDirectory;
+                                                    }
+                                                  },
+                                                  child: Ink(child: Image.asset('assets/folder.png'))))),
+                                      SizedBox(
+                                        height: 20,
+                                      ),
+                                      const Text("What should the default download type be?"),
+                                      DropdownButton<String>(
+                                          value: defaultDownloadType,
+                                          items: [
+                                            DropdownMenuItem(
+                                                value: 'muxed',
+                                                child: Text(
+                                                  'muxed',
+                                                  style: GoogleFonts.inter(),
+                                                )),
+                                            DropdownMenuItem(
+                                                value: 'audio',
+                                                child: Text(
+                                                  'audio',
+                                                  style: GoogleFonts.inter(),
+                                                )),
+                                            DropdownMenuItem(
+                                                value: 'video',
+                                                child: Text(
+                                                  'video',
+                                                  style: GoogleFonts.inter(),
+                                                ))
+                                          ],
+                                          onChanged: (String? value) async {
+                                            if (value != null) {
+                                              //settingsBox.put('downloadType', value);
+                                              print(value);
+                                              setState(() {
+                                                defaultDownloadType = value;
+                                              });
+                                            }
+                                          })
+                                    ]),
+                                  );
+                                }),
+                                actions: [
+                                  TextButton(
+                                      onPressed: () {
+                                        Navigator.of(context).pop();
+                                      },
+                                      child: Text("Close", style: GoogleFonts.inter(color: const Color(0xFFB0172A))))
+                                ],
+                              );
+                            });
+                      },
+                      child: Ink(child: Image.asset('assets/settings.png'))))
             ]),
             const SizedBox(height: 17),
             Padding(
@@ -487,9 +578,6 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                 shrinkWrap: true,
                 itemCount: videos.length,
                 itemBuilder: ((BuildContext context, int count) {
-                  print(count);
-                  print(isDownloading);
-                  print((count == 0) && isDownloading);
                   return Padding(
                       padding: const EdgeInsets.only(bottom: 25),
                       child: GestureDetector(
