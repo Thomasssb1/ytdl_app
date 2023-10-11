@@ -4,10 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import 'package:marquee/marquee.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:hive/hive.dart';
-import 'package:ytdl_app/setting.dart';
 
 class HomeApp extends StatefulWidget {
   HomeApp({super.key});
@@ -27,7 +25,9 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
   List<Map> videos = [];
 
   bool isDownloading = false;
+  bool isPaused = false;
   bool isFetching = false;
+  bool isDeleted = false;
   //Directory? downloadsDir;
 
   var settingsBox = Hive.box('settings');
@@ -72,7 +72,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
     return false;
   }
 
-  Future<void> downloadVideo() async {
+  Future<void> downloadVideo([int start = 0]) async {
     // check if currently downloading
     // if not downloading then start download
     // if downloading then ignore
@@ -153,14 +153,26 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
         int current = 0;
 
         await for (final data in stream) {
-          print(data.length);
+          if (isPaused) {
+            await Future.doWhile(() => Future.delayed(Duration(seconds: 1)).then((_) => isPaused));
+          }
+
           current += data.length;
-          videos[0]['progress'].value = (current / streamInfo.size.totalBytes);
+          print(data.length);
+          if (!isDeleted) {
+            videos[0]['progress'].value = (current / streamInfo.size.totalBytes);
+          } else {
+            break;
+          }
           output.add(data);
         }
         await output.close();
+
+        if (isDeleted) file.deleteSync();
+
         setState(() {
-          videos.removeAt(0);
+          if (!isDeleted) videos.removeAt(0);
+          isDeleted = false;
           isDownloading = false;
         });
 
@@ -193,6 +205,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
               controller: urlController,
               textAlignVertical: TextAlignVertical.center,
               onSubmitted: (_) async {
+                print("trigg");
                 bool addVideo = true;
                 if (containsURL(urlController.text)) {
                   await showDialog(
@@ -228,7 +241,6 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                 if (addVideo) {
                   try {
                     setState(() => isFetching = true);
-
                     var video = await yt.videos.get(urlController.text);
                     setState(() {
                       videos.add({
@@ -310,6 +322,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                       showCloseIcon: true,
                     ));
                   } catch (e) {
+                    print("enter: $e");
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                       backgroundColor: Color(0xFFB0172A),
                       content: Text("Something went wrong.. Try again."),
@@ -445,6 +458,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                             showCloseIcon: true,
                           ));
                         } catch (e) {
+                          print("press: $e");
                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                             backgroundColor: Color(0xFFB0172A),
                             content: Text("Something went wrong.. Try again."),
@@ -477,10 +491,10 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
               InkWell(
                   onTap: () {
                     setState(() {
-                      isDownloading = !isDownloading;
+                      isPaused = !isPaused;
                     });
                   },
-                  child: Ink(child: isDownloading ? Image.asset('assets/pause.png') : Image.asset('assets/play.png'))),
+                  child: Ink(child: isPaused ? Image.asset('assets/play.png') : Image.asset('assets/pause.png'))),
               Padding(
                   padding: EdgeInsets.only(left: 240),
                   child: InkWell(
@@ -604,6 +618,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                                           onPressed: () {
                                             setState(() {
                                               videos.removeAt(count);
+                                              isDownloading = false;
                                             });
                                             Navigator.of(context).pop();
                                             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -687,6 +702,8 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                                                                   onPressed: () {
                                                                     setState(() {
                                                                       videos.removeAt(count);
+                                                                      isDownloading = false;
+                                                                      if (count == 0) isDeleted = true;
                                                                     });
                                                                     Navigator.of(context).pop();
                                                                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -791,17 +808,7 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                                                         context: context,
                                                         builder: (ctx) {
                                                           return AlertDialog(
-                                                            title: Row(children: [
-                                                              const Text('What do the icons mean?'),
-                                                              Padding(
-                                                                  padding: const EdgeInsets.only(left: 18, top: 5),
-                                                                  child: InkWell(
-                                                                      onTap: () {
-                                                                        Navigator.of(context).pop();
-                                                                      },
-                                                                      child:
-                                                                          Ink(child: Image.asset('assets/cancel.png'))))
-                                                            ]),
+                                                            title: const Text('What do the icons mean?'),
                                                             content: SizedBox(
                                                                 height: 150,
                                                                 child: Column(
@@ -829,6 +836,15 @@ class _HomeAppState extends State<HomeApp> with ChangeNotifier {
                                                                                     const Color.fromRGBO(0, 0, 0, 0.7)))
                                                                       ])
                                                                     ])),
+                                                            actions: [
+                                                              TextButton(
+                                                                  onPressed: () {
+                                                                    Navigator.of(context).pop();
+                                                                  },
+                                                                  child: Text("Close",
+                                                                      style: GoogleFonts.inter(
+                                                                          color: const Color(0xFFB0172A))))
+                                                            ],
                                                           );
                                                         });
                                                   },

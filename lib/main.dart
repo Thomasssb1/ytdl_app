@@ -33,6 +33,6 @@ class _MainAppState extends State<MainApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(home: HomeApp());
+    return MaterialApp(home: HomeApp(), debugShowCheckedModeBanner: false);
   }
 }
