@@ -1,4 +1,4 @@
-package com.example.ytdl_app
+package com.redshock.ytdl_app
 
 import io.flutter.embedding.android.FlutterActivity
 
