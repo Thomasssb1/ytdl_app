@@ -19,7 +19,7 @@ dependencies:
   marquee: ^2.2.3
   permission_handler: ^11.0.0
   resize: ^1.0.0
-  youtube_explode_dart: ^2.0.2
+  youtube_explode_dart: ^2.3.10
 
 dev_dependencies:
   flutter_test:
@@ -33,8 +33,8 @@ flutter_launcher_icons:
   min_sdk_android: 21 # android min sdk min:16, default 21
 
 flutter_native_splash:
-  color: '#B0172A'
-  image: 'assets/icon/icon.png'
+  color: "#B0172A"
+  image: "assets/icon/icon.png"
 
 flutter:
   uses-material-design: true
